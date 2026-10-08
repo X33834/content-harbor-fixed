@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, refactor-v1]
+  pull_request:
+    branches: [main, refactor-v1]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装 uv
+        run: pip install uv
+      - name: 安装依赖（uv sync，含 dev 组）
+        run: uv sync
+      - name: 语法检查（compileall）
+        run: uv run python -m compileall -q .
+      - name: 启动冒烟测试（应用可装配、API 可访问）
+        run: |
+          set -euo pipefail
+          uv run python -c "from app.factory import create_app; create_app(); print('app assembled ok')"
