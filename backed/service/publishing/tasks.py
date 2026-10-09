@@ -132,6 +132,16 @@ class TaskManager:
             db.update_task(self.conn, task_id, status="ok",
                            result=json.dumps(result, ensure_ascii=False),
                            message="完成", finished_at=time.time())
+            # 触发事件：任务完成
+            from service.publishing import events as evt_mod
+            completed = db.get_task(self.conn, task_id)
+            if completed:
+                try:
+                    completed["platforms"] = json.loads(completed.get("platforms") or "[]")
+                    completed["result"] = json.loads(completed.get("result") or "{}")
+                except Exception:
+                    pass
+                evt_mod.on_task_complete(completed)
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             action, reason = self._triage(kind, err, attempts)
@@ -147,6 +157,15 @@ class TaskManager:
                 db.update_task(self.conn, task_id, status="failed",
                                error=err, message=reason,
                                finished_at=time.time())
+            # 触发事件：任务失败/等人工
+            from service.publishing import events as evt_mod
+            completed = db.get_task(self.conn, task_id)
+            if completed:
+                try:
+                    completed["platforms"] = json.loads(completed.get("platforms") or "[]")
+                except Exception:
+                    pass
+                evt_mod.on_task_complete(completed)
         finally:
             db.prune_tasks(self.conn)
 

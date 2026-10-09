@@ -189,11 +189,20 @@ class AIWriteIn(BaseModel):
     words: int = 2000
     tags_hint: str = ""
     publish_to: Optional[List[str]] = None
+    model: str = ""           # "provider:model_name" 或 "model_name"
+    preferred_provider: str = ""
 
 
 class AIRewriteIn(BaseModel):
     instruction: str
     publish_to: Optional[List[str]] = None
+    model: str = ""
+    preferred_provider: str = ""
+
+
+class AIModelIn(BaseModel):
+    model: str = ""           # "provider:model_name" 或 "model_name"
+    preferred_provider: str = ""
 
 
 @hub_router.get("/status")
@@ -417,22 +426,42 @@ def refresh(platform: str, limit: int = 50):
 @hub_router.post("/ai/write")
 def ai_write(body: AIWriteIn):
     return get_hub().ai_write(body.topic, body.style, body.words,
-                        body.tags_hint, body.publish_to)
+                        body.tags_hint, body.publish_to,
+                        model=body.model or None,
+                        preferred_provider=body.preferred_provider or None)
 
 
 @hub_router.post("/articles/{aid}/ai-rewrite")
 def ai_rewrite(aid: int, body: AIRewriteIn):
-    return get_hub().ai_rewrite(aid, body.instruction, body.publish_to)
+    return get_hub().ai_rewrite(aid, body.instruction, body.publish_to,
+                               model=body.model or None,
+                               preferred_provider=body.preferred_provider or None)
 
 
 @hub_router.post("/articles/{aid}/ai-polish")
-def ai_polish(aid: int):
-    return get_hub().ai_polish(aid)
+def ai_polish(aid: int, body: AIModelIn = None):
+    model = body.model if body else None
+    preferred = body.preferred_provider if body else None
+    return get_hub().ai_polish(aid, model=model, preferred_provider=preferred)
 
 
 @hub_router.get("/ai/status")
 def ai_status():
-    return {"ready": get_hub().ai_ready()}
+    ready = get_hub().ai_ready()
+    providers = []
+    try:
+        from service.publishing import providers as prov_mod
+        providers = prov_mod.list_providers()
+    except Exception:
+        pass
+    return {"ready": ready, "providers": providers}
+
+
+@hub_router.get("/ai/providers")
+def ai_providers():
+    """列出所有可用 Provider + 模型（前端下拉菜单）。"""
+    from service.publishing import providers as prov_mod
+    return prov_mod.list_providers()
 
 
 @hub_router.get("/ai/gate")
@@ -569,15 +598,20 @@ def versions_rollback(aid: int, vid: int):
 # ==================== AI 增强工具 ====================
 
 @hub_router.post("/articles/{aid}/ai-translate")
-def ai_translate(aid: int, target_lang: str = "en"):
+def ai_translate(aid: int, body: AIModelIn = None, target_lang: str = "en"):
     """翻译文章到目标语言。target_lang: en/ja/ko/fr/de。"""
-    return get_hub().ai_translate(aid, target_lang)
+    model = body.model if body else None
+    preferred = body.preferred_provider if body else None
+    return get_hub().ai_translate(aid, target_lang, model=model,
+                                  preferred_provider=preferred)
 
 
 @hub_router.get("/articles/{aid}/ai-image-prompts")
-def ai_image_prompts(aid: int, n: int = 3):
+def ai_image_prompts(aid: int, n: int = 3, model: str = None,
+                     preferred_provider: str = None):
     """根据文章内容生成文生图 prompt。"""
-    return get_hub().ai_image_prompts(aid, n)
+    return get_hub().ai_image_prompts(aid, n, model=model,
+                                       preferred_provider=preferred_provider)
 
 
 @hub_router.get("/articles/{aid}/ai-outline")
@@ -616,6 +650,21 @@ def ai_write_template(
                            summary=art["summary"], tags=art["tags"],
                            source="ai", ai_model=art.get("ai_model", ""))
     return {"id": aid, "title": art["title"], "summary": art["summary"]}
+
+
+# ==================== 内容质检 ====================
+
+@hub_router.post("/articles/{aid}/qa")
+def article_qa(aid: int):
+    """对已有文章运行完整质检（可读性 + SEO + 重复度）。"""
+    return get_hub().content_qa(article_id=aid)
+
+
+@hub_router.post("/qa/analyze")
+def qa_analyze(content_md: str, title: str = "", summary: str = "", tags: str = ""):
+    """对任意文本运行质检（不保存文章）。"""
+    return get_hub().content_qa(content_md=content_md, title=title,
+                                summary=summary, tags=tags)
 
 
 # ==================== 标签治理 ====================
@@ -671,6 +720,63 @@ def tags_suggest(title: str = "", content_md: str = ""):
 
 
 # ---------------- 可观测性端点 ----------------
+
+# ==================== Webhook / 事件 ====================
+
+class WebhookIn(BaseModel):
+    url: str
+    secret: str = ""
+    events: Optional[List[str]] = None   # None=["*"] 表示全订阅
+    enabled: bool = True
+
+
+@hub_router.get("/webhooks")
+def webhooks_list():
+    from service.publishing import events as evt_mod
+    return evt_mod.list_webhooks()
+
+
+@hub_router.post("/webhooks")
+def webhooks_create(body: WebhookIn):
+    from service.publishing import events as evt_mod
+    wid = evt_mod.register_webhook(body.url, body.events, body.secret, body.enabled)
+    return {"id": wid, "message": "Webhook 注册成功"}
+
+
+@hub_router.put("/webhooks/{wid}")
+def webhooks_update(wid: int, body: WebhookIn):
+    from service.publishing import events as evt_mod
+    data = {k: v for k, v in body.dict().items() if v is not None}
+    ok = evt_mod.update_webhook(wid, **data)
+    if not ok:
+        raise HTTPException(404, "Webhook 不存在")
+    return {"ok": True}
+
+
+@hub_router.delete("/webhooks/{wid}")
+def webhooks_delete(wid: int):
+    from service.publishing import events as evt_mod
+    ok = evt_mod.delete_webhook(wid)
+    if not ok:
+        raise HTTPException(404, "Webhook 不存在")
+    return {"ok": True}
+
+
+@hub_router.post("/webhooks/{wid}/test")
+def webhooks_test(wid: int):
+    """发送测试事件到指定 webhook。"""
+    from service.publishing import events as evt_mod
+    evt_mod.init_events()
+    evt_mod.emit("test", {"message": "Content Harbor 测试事件", "webhook_id": wid})
+    return {"ok": True, "message": "测试事件已派发"}
+
+
+@hub_router.get("/notifications")
+def notifications_list(since: float = None, limit: int = 50):
+    """获取最近站内通知（事件环形缓冲）。"""
+    from service.publishing import events as evt_mod
+    return evt_mod.get_notifications(since=since, limit=limit)
+
 
 @hub_router.get("/metrics")
 def metrics():

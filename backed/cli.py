@@ -147,10 +147,14 @@ def refresh(ctx, platform):
 @click.option("--words", type=int, default=2000)
 @click.option("--tags", default="", help="给 AI 的标签提示")
 @click.option("--publish", default="", help="写完顺手发到这些平台，逗号分隔")
+@click.option("--model", default="", help="provider:model 或 model 名，不指定走 premium 路由")
+@click.option("--provider", default="", help="优先使用的 Provider 名")
 @click.pass_context
-def ai_write(ctx, topic, style, words, tags, publish):
+def ai_write(ctx, topic, style, words, tags, publish, model, provider):
     pub = publish.split(",") if publish else None
-    _echo_json(_hub(ctx.obj["headed"]).ai_write(topic, style, words, tags, pub))
+    _echo_json(_hub(ctx.obj["headed"]).ai_write(
+        topic, style, words, tags, pub,
+        model=model or None, preferred_provider=provider or None))
 
 
 @cli.command("ai-rewrite", help="AI 改写已有文章")

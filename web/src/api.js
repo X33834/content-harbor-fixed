@@ -62,16 +62,29 @@ export const api = {
   // 需要人工处理的发布实例（掘金草稿等人点"确定并发布"）
   pendingHuman: () => http.get('/pending-human'),
 
+  // ---------------- AI Provider / 模型选择 ----------------
+  aiProviders: () => http.get('/ai/providers'),
+
   // ---------------- AI 写稿 ----------------
   aiWrite: (data) => http.post('/ai/write', data),
-  aiRewrite: (id, instruction, publishTo) =>
-    http.post(`/articles/${id}/ai-rewrite`, { instruction, publish_to: publishTo }),
-  aiPolish: (id) => http.post(`/articles/${id}/ai-polish`),
+  aiRewrite: (id, instruction, publishTo, model, provider) =>
+    http.post(`/articles/${id}/ai-rewrite`, {
+      instruction, publish_to: publishTo,
+      model: model || '', preferred_provider: provider || ''
+    }),
+  aiPolish: (id, model, provider) =>
+    http.post(`/articles/${id}/ai-polish`, {
+      model: model || '', preferred_provider: provider || ''
+    }),
   aiStatus: () => http.get('/ai/status'),
 
   // ---------------- AI 增强工具 ----------------
-  aiTranslate: (id, lang = 'en') => http.post(`/articles/${id}/ai-translate`, null, { params: { target_lang: lang } }),
-  aiImagePrompts: (id, n = 3) => http.get(`/articles/${id}/ai-image-prompts`, { params: { n } }),
+  aiTranslate: (id, lang = 'en', model, provider) => http.post(`/articles/${id}/ai-translate`, {
+    model: model || '', preferred_provider: provider || ''
+  }, { params: { target_lang: lang } }),
+  aiImagePrompts: (id, n = 3, model, provider) => http.get(`/articles/${id}/ai-image-prompts`, {
+    params: { n, model: model || undefined, preferred_provider: provider || undefined }
+  }),
   aiOutline: (id) => http.get(`/articles/${id}/ai-outline`),
   aiSeo: (id) => http.get(`/articles/${id}/ai-seo`),
   cloneArticle: (id) => http.post(`/articles/${id}/clone`),
@@ -102,5 +115,19 @@ export const api = {
   addTagAlias: (alias, canonical) => http.post('/tags/alias', null, { params: { alias, canonical } }),
   suggestTags: (title, contentMd) => http.post('/tags/suggest', null, { params: { title, content_md: contentMd } }),
 
-  jobs: () => http.get('/jobs')
+  jobs: () => http.get('/jobs'),
+
+  // ---------------- 内容质检 ----------------
+  qaArticle: (aid) => http.post(`/articles/${aid}/qa`),
+  qaAnalyze: (contentMd, title, summary, tags) =>
+    http.post('/qa/analyze', { content_md: contentMd, title, summary, tags }),
+
+  // ---------------- Webhook / 事件通知 ----------------
+  webhooks: () => http.get('/webhooks'),
+  createWebhook: (data) => http.post('/webhooks', data),
+  updateWebhook: (wid, data) => http.put(`/webhooks/${wid}`, data),
+  deleteWebhook: (wid) => http.delete(`/webhooks/${wid}`),
+  testWebhook: (wid) => http.post(`/webhooks/${wid}/test`),
+  notifications: (since, limit = 50) =>
+    http.get('/notifications', { params: { since, limit } })
 }

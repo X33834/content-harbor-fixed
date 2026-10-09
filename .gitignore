@@ -18,6 +18,10 @@ backed/database/data/
 !.env.example
 !.env.docker
 
+# 前端构建产物 / 依赖
+node_modules/
+server/static/
+
 # 编辑器 / 系统
 .idea/
 .vscode/

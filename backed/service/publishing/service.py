@@ -49,6 +49,9 @@ class Hub:
         self.headless = headless
         # 版本历史：每次 edit/AI 改写前自动存旧版快照（时光机回滚能力）
         init_versions(self.conn)
+        # 事件系统：webhook 表初始化
+        from service.publishing import events as evt_mod
+        evt_mod.init_events(self.conn)
         # 演示模式（DEMO=1）：不开浏览器、不调外部 API，登录/发布/更新/AI 写稿
         # 全部模拟成功，用于产品演示与宣传片录制。任务引擎照常真实运转。
         self.demo = os.environ.get("DEMO") == "1"
@@ -552,9 +555,11 @@ class Hub:
             "ext": "{}",
         }
 
-    def ai_write(self, topic, style="", words=2000, tags_hint="", publish_to=None):
+    def ai_write(self, topic, style="", words=2000, tags_hint="", publish_to=None,
+                 model=None, preferred_provider=None):
         """AI 写一篇并入库。传了 publish_to 就顺手发出去。
 
+        model: "provider:model_name" 指定，不指定时按 premium 路由。
         合规闸门：AI 源文章发布强制 draft_only（人审闸门），禁止 AI 内容
         直接正式上线。想上线须人工二次确认后再调 publish(draft_only=False)。
         """
@@ -562,7 +567,8 @@ class Hub:
             art = self._demo_article(topic, style, words, tags_hint)
         else:
             from service.publishing import ai as ai_mod
-            art = ai_mod.write_article(topic, style, words, tags_hint)
+            art = ai_mod.write_article(topic, style, words, tags_hint,
+                                       model=model, preferred_provider=preferred_provider)
         # 入库前打 AIGC 标识（法规要求显式标识 + 可追溯模型来源）
         art = aigc_gate.add_aigc_label(art, art.get("ai_model", ""))
         ext = json.loads(art.get("ext", "{}") or {})
@@ -581,23 +587,29 @@ class Hub:
                           "确认无误后请调 /articles/{id}/publish(draft_only=false) 正式上线"
         return out
 
-    def ai_rewrite(self, article_id, instruction, publish_to=None):
-        """AI 改写已有文章，改完自动标记待同步。改写前存版本快照（可回滚）。"""
+    def ai_rewrite(self, article_id, instruction, publish_to=None, model=None,
+                   preferred_provider=None):
+        """AI 改写已有文章，改完自动标记待同步。改写前存版本快照（可回滚）。
+
+        model: "provider:model_name" 指定改写模型。
+        """
         from service.publishing import ai as ai_mod
         art = self.get(article_id)
         if not art:
             raise ValueError(f"文章 {article_id} 不存在")
         ver_capture(art, change_kind="ai_rewrite",
                     change_note=f"AI 改写: {instruction[:80]}", created_by="ai")
-        new_md = ai_mod.rewrite(art["content_md"], instruction)
+        new_md = ai_mod.rewrite(art["content_md"], instruction,
+                                model=model, preferred_provider=preferred_provider)
         db.update_article(self.conn, article_id, content_md=new_md)
         out = {"id": article_id, "chars": len(new_md),
-               "pending_sync": len(db.get_pending_updates(self.conn))}
+               "pending_sync": len(db.get_pending_updates(self.conn)),
+               "model": model or "auto"}
         if publish_to:
             out["update"] = self.update(article_id, publish_to)
         return out
 
-    def ai_polish(self, article_id):
+    def ai_polish(self, article_id, model=None, preferred_provider=None):
         """AI 润色文章。润色前存版本快照（可回滚）。"""
         from service.publishing import ai as ai_mod
         art = self.get(article_id)
@@ -605,29 +617,33 @@ class Hub:
             raise ValueError(f"文章 {article_id} 不存在")
         ver_capture(art, change_kind="ai_polish",
                     change_note="AI 润色", created_by="ai")
-        new_md = ai_mod.polish(art["content_md"])
+        new_md = ai_mod.polish(art["content_md"],
+                               model=model, preferred_provider=preferred_provider)
         db.update_article(self.conn, article_id, content_md=new_md)
         return {"id": article_id, "pending_sync": len(db.get_pending_updates(self.conn))}
 
     # ---------------- AI 增强工具（翻译/配图/大纲/SEO/克隆）----------------
 
-    def ai_translate(self, article_id, target_lang="en"):
+    def ai_translate(self, article_id, target_lang="en", model=None,
+                     preferred_provider=None):
         """翻译文章到目标语言。语言代码：en/ja/ko/fr/de。"""
         from service.publishing.ai_enhancements import translate
         art = self.get(article_id)
         if not art:
             raise ValueError(f"文章 {article_id} 不存在")
-        translated = translate(art["content_md"], target_lang=target_lang)
+        translated = translate(art["content_md"], target_lang=target_lang,
+                              model=model, preferred_provider=preferred_provider)
         return {"id": article_id, "target_lang": target_lang,
                 "chars": len(translated), "translated_md": translated[:2000]}
 
-    def ai_image_prompts(self, article_id, n=3):
+    def ai_image_prompts(self, article_id, n=3, model=None, preferred_provider=None):
         """根据文章内容生成文生图 prompt（前端展示/复制给用户）。"""
         from service.publishing.ai_enhancements import image_prompts
         art = self.get(article_id)
         if not art:
             raise ValueError(f"文章 {article_id} 不存在")
-        prompts = image_prompts(art.get("title", ""), art.get("content_md", ""), n=n)
+        prompts = image_prompts(art.get("title", ""), art.get("content_md", ""),
+                                n=n, model=model, preferred_provider=preferred_provider)
         return {"id": article_id, "prompts": prompts}
 
     def ai_outline(self, article_id):
@@ -663,6 +679,37 @@ class Hub:
         """用预置模板 AI 写文章。template_key: tutorial/opinion/deep_dive/news_brief。"""
         from service.publishing.ai_enhancements import ai_write_with_template
         return ai_write_with_template(topic, template_key, **kw)
+
+    def list_models(self):
+        """列出所有可用的 Provider + 模型，前端下拉菜单用。"""
+        from service.publishing import providers as prov_mod
+        return prov_mod.list_providers()
+
+    def content_qa(self, article_id=None, content_md=None, title=None,
+                   summary=None, tags=None):
+        """内容质检：可读性 + SEO + 重复度。可传入 article_id 或独立传入字段。"""
+        from service.publishing import content_qa as qa_mod
+
+        if article_id:
+            art = self.get(article_id)
+            if not art:
+                raise ValueError(f"文章 {article_id} 不存在")
+            content_md = art.get("content_md", "")
+            title = art.get("title", "")
+            summary = art.get("summary", "")
+            tags = art.get("tags", "")
+
+        # 获取库内文章做重复度对比
+        other = [dict(r) for r in db.list_articles(self.conn, limit=500)]
+        # 排除自身
+        if article_id:
+            other = [a for a in other if a["id"] != article_id]
+
+        return qa_mod.full_qa(
+            {"title": title or "", "content_md": content_md or "",
+             "summary": summary or "", "tags": tags or ""},
+            other_articles=other
+        )
 
     def list_ai_templates(self):
         """列出所有可用的 AI 写作模板。"""

@@ -50,7 +50,7 @@ PROMPT_TEMPLATES = {
 }
 
 
-def translate(content_md, target_lang="en", model=None):
+def translate(content_md, target_lang="en", model=None, preferred_provider=None):
     """翻译 Markdown 文章到目标语言。
 
     保留代码块不动（代码永远不该被翻译），翻译正文与标题。
@@ -95,7 +95,7 @@ def translate(content_md, target_lang="en", model=None):
         translated = ai_mod.chat(
             [{"role": "system", "content": ai_mod.system_write()},
              {"role": "user", "content": prompt}],
-            model=model,
+            model=model, task="translate", preferred_provider=preferred_provider,
         )
     except Exception as e:
         raise ai_mod.AIError(f"翻译失败: {e}")
@@ -109,7 +109,7 @@ def translate(content_md, target_lang="en", model=None):
     return translated
 
 
-def image_prompts(title, content_md, n=3, model=None):
+def image_prompts(title, content_md, n=3, model=None, preferred_provider=None):
     """根据文章内容生成本地可用的文生图提示。
 
     返回 n 个提示（英文，兼容 SDXL / Flux / DALL·E），每个对应文章一个关键概念。
@@ -130,7 +130,8 @@ def image_prompts(title, content_md, n=3, model=None):
     try:
         raw = ai_mod.chat(
             [{"role": "user", "content": prompt}],
-            model=model, max_tokens=600, temperature=0.8,
+            model=model, task="image_prompts", max_tokens=600, temperature=0.8,
+            preferred_provider=preferred_provider,
         )
         prompts = [p.strip() for p in raw.split("|||") if p.strip()]
         return prompts[:n]
@@ -265,6 +266,7 @@ def ai_write_with_template(topic, template_key="", **kw):
         words=words,
         tags_hint=kw.get("tags_hint", ""),
         model=kw.get("model"),
+        preferred_provider=kw.get("preferred_provider"),
     )
 
 

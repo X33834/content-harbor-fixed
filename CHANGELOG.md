@@ -2,6 +2,50 @@
 
 ---
 
+## [0.6.0] - 2026-10-09
+
+### 新增：多模型管理
+
+- **8 个 AI Provider 预置**：DeepSeek / OpenAI / Anthropic / Kimi / 通义千问 / 智谱 / Ollama 本地
+- **任务分级路由**：写作用 premium，润色用 standard，标签/摘要/大纲/SEO 用 economy
+- **自动故障转移**：某个 Provider 连续失败 3 次冷却 2 分钟，自动切到下一可用
+- **按请求指定模型**：任意 AI 调用传 `model="provider:model_name"` 绕过路由
+- **前端模型下拉**：AI 写稿弹窗新增 Provider · 模型选择，留空走自动路由
+- **CLI `--model` / `--provider`**：命令行指定模型和 Provider
+- REST: `GET /ai/providers` · `GET /ai/status` (enriched)
+
+### 新增：事件 / 通知系统
+
+- **Webhook 注册**：URL + 事件过滤 + HMAC 签名，事件异步 POST 推送
+- **事件类型**：task.ok / task.failed / task.waiting_human / publish.ok / publish.failed 等 10 种
+- **站内通知**：环形缓冲最近 200 条，`GET /notifications` 拉取
+- **自动禁用僵尸 Webhook**：连续失败 5 次暂停
+- **任务完成自动触发事件**：TaskManager 内建 emit 节点
+- REST: `GET/POST/PUT/DELETE /webhooks/{id}` · `POST /webhooks/{id}/test` · `GET /notifications`
+
+### 新增：内容质检
+
+- **可读性评分**：基于句长、段落长度、标题密度、代码占比；0-100 + 等级
+- **SEO 评分**：TDK 完整度、关键词分布、H 标签结构、图片 alt、内链数
+- **近似重复检测**：MinHash + Jaccard 查重，阈值 35%
+- **一键运行**：`content_qa()` 返回总分 + 分项 + 改进建议
+- 前端编辑器「视图与 AI」下拉新增「内容质检」条目 + 圆形总分图
+- REST: `POST /articles/{id}/qa` · `POST /qa/analyze`
+
+### 新增：MCP Server（FastMCP）
+
+- **16 个 MCP Tool**：覆盖文章 / AI 写稿 / 发布 / 任务 / 质检 / 标签 / Provider
+- **stdio + SSE** 两种传输，对接 Claude Code / Cursor / Windsurf
+- 文件：`mcp_server.py`（项目根目录，独立运行）
+
+### 前端改善
+
+- AI 写稿弹窗增加模型选择器（按 Provider 分组，标注经济/均衡/旗舰）
+- 文章编辑器新增「内容质检」菜单项 + 质检报告弹窗（圆形总分 + 可读性/SEO/重复度 + 改时建议）
+- Element Plus 改为全局注册（uniplugin 轻量化），包体略大但构建更稳定
+
+---
+
 ## [0.5.0] - 2026-10-09
 
 ### 新增：AI 工作流完整工具链

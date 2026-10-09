@@ -8,6 +8,17 @@
       <el-form-item label="主题" required>
         <el-input v-model="form.topic" placeholder="例如：用 Python 手写一个任务队列" />
       </el-form-item>
+      <el-form-item label="模型">
+        <el-select v-model="form.model" placeholder="自动路由（写作用旗舰，标签用经济型）" style="width:100%" clearable>
+          <el-option-group v-for="prov in providerGroups" :key="prov.key" :label="prov.name + ' · ' + prov.price">
+            <el-option v-for="m in prov.models" :key="prov.key + ':' + m"
+                       :value="prov.key + ':' + m" :label="m" />
+          </el-option-group>
+        </el-select>
+        <div class="dim small" style="margin-top:4px">
+          留空自动路由：写作用旗舰、润色用均衡、标签/摘要用经济型
+        </div>
+      </el-form-item>
       <el-form-item label="文风">
         <el-select v-model="form.style" placeholder="默认：技术干货" style="width:100%">
           <el-option label="技术干货" value="技术干货，有代码示例" />
@@ -47,9 +58,10 @@
 </style>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, computed, onMounted } from 'vue'
 import { api } from '@/api'
 import { ElMessage } from 'element-plus'
+import { useHubStore } from '@/stores/hub'
 
 const props = defineProps({
   modelValue: Boolean,
@@ -57,13 +69,30 @@ const props = defineProps({
   ready: Boolean
 })
 const emit = defineEmits(['update:modelValue', 'done'])
+const hub = useHubStore()
 
 const visible = ref(false)
 const loading = ref(false)
-const form = reactive({ topic: '', style: '', words: 2000, tags_hint: '', publish_to: [] })
+const form = reactive({ topic: '', style: '', words: 2000, tags_hint: '', publish_to: [], model: '' })
+
+// 把后端 provider 列表转成前端分组格式
+const providerGroups = computed(() => {
+  return (hub.aiProviders || []).map(p => ({
+    key: p.key, name: p.name, models: p.models || [],
+    price: p.price_level === 'premium' ? '旗舰' : p.price_level === 'standard' ? '均衡' : '经济',
+    cooling: p.cooling
+  }))
+})
+
+onMounted(() => {
+  if (!hub.aiProviders.length) hub.loadAiProviders()
+})
 
 // v-model 双向：外面改 modelValue，里面改 visible
-watch(() => props.modelValue, v => { visible.value = v })
+watch(() => props.modelValue, v => {
+  visible.value = v
+  if (v && !hub.aiProviders.length) hub.loadAiProviders()
+})
 watch(visible, v => emit('update:modelValue', v))
 
 async function submit() {
@@ -74,9 +103,10 @@ async function submit() {
       style: form.style,
       words: form.words,
       tags_hint: form.tags_hint,
-      publish_to: form.publish_to.length ? form.publish_to : null
+      publish_to: form.publish_to.length ? form.publish_to : null,
+      model: form.model || ''
     })
-    ElMessage.success(`已生成《${r.title}》${r.chars} 字`)
+    ElMessage.success(`已生成《${r.title}》${r.chars} 字 ${r.ai_model ? '(' + r.ai_model + ')' : ''}`)
     emit('done', r.id)
     visible.value = false
   } finally { loading.value = false }

@@ -32,6 +32,19 @@ STYLE_MARK = "【写作风格档案】"
 MIN_COMPLETENESS_RATIO = 0.6
 MAX_EXPAND_ROUNDS = 1
 
+# 多 Provider 路由（可选升级）：
+# 如果配置了 providers（环境变量 AI_API_KEY 以外还配了别的），
+# write_article / rewrite / polish 等函数接受 model="provider:model" 指定模型和 Provider。
+# 不指定时 fallback 到旧的单 Provider 逻辑（向下兼容）。
+_providers_mod = None
+def _get_providers():
+    """惰性加载 providers 模块（避免循环导入）。"""
+    global _providers_mod
+    if _providers_mod is None:
+        from service.publishing import providers as p
+        _providers_mod = p
+    return _providers_mod
+
 
 def _cfg(key, default=None):
     return os.environ.get(key) or _file_cfg().get(key) or default
@@ -105,19 +118,45 @@ def system_write(extra_style: str = "") -> str:
     return "\n\n".join(parts)
 
 
-def chat(messages, model=None, temperature=0.7, max_tokens=4096):
+def chat(messages, model=None, temperature=0.7, max_tokens=4096, task="standard",
+         preferred_provider=None):
+    """chat 兼容旧接口，并升级到多 Provider。
+
+    优先级：
+      1. model="provider:model" 格式 → 走 providers 模块指定路由
+      2. providers 模块检测到多 Provider 配置 → 按 task 级别路由
+      3. fallback 到旧的单 Provider 逻辑（环境变量 / config.json）
+    """
+    # 判断是否可以走多 Provider 路由
+    prov_mod = _get_providers()
+    has_multi = len(prov_mod._resolve_providers()) > 1
+    has_explicit = model and (":" in model or preferred_provider)
+
+    if has_multi or has_explicit:
+        try:
+            result = prov_mod.chat(messages, model=model, task=task,
+                                   temperature=temperature, max_tokens=max_tokens,
+                                   preferred_provider=preferred_provider)
+            return result["text"]
+        except Exception as e:
+            # 多 Provider 失败不立即 fallback（避免无限循环），直接报错
+            if has_explicit:
+                raise AIError(f"指定的 Provider/模型不可用: {e}")
+            # 多 Provider 路由失败，fallback 到旧逻辑
+
+    # 旧路径（单 Provider fallback，向下兼容）
     api_key = _cfg("AI_API_KEY")
     if not api_key:
         raise AIError("没配 AI_API_KEY。export AI_API_KEY=xxx 或写进 config.json")
 
     base = _cfg("AI_BASE_URL", DEFAULT_BASE).rstrip("/")
-    model = model or _cfg("AI_MODEL", DEFAULT_MODEL)
+    actual_model = model or _cfg("AI_MODEL", DEFAULT_MODEL)
 
     try:
         r = requests.post(f"{base}/chat/completions",
                           headers={"Authorization": f"Bearer {api_key}",
                                    "Content-Type": "application/json"},
-                          json={"model": model, "messages": messages,
+                          json={"model": actual_model, "messages": messages,
                                 "temperature": temperature,
                                 "max_tokens": max_tokens},
                           timeout=TIMEOUT)
@@ -143,18 +182,21 @@ def _split_title(raw: str, topic: str):
     return (line.strip() or topic), body.lstrip("\n")
 
 
-def write_article(topic, style="", words=2000, tags_hint="", model=None):
+def write_article(topic, style="", words=2000, tags_hint="", model=None, preferred_provider=None):
     """写一篇完整的文章，返回结构化结果，可直接入库。
 
     篇幅兜底：正文明显短于要求时自动续写一轮（MAX_EXPAND_ROUNDS），
     避免"要 2000 字结果给 600 字"的半成品流进发布链路。
+
+    model: "provider:model_name" 指定。不指定时走 premium 级别路由。
     """
     prompt = f"""写主题为「{topic}」的技术文章，目标 {words} 字左右。
 {f'建议涉及：{tags_hint}' if tags_hint else ''}
 
 先输出一行标题（以「标题：」开头），然后空一行，再输出 Markdown 正文。"""
     raw = chat([{"role": "system", "content": system_write(style)},
-                {"role": "user", "content": prompt}], model=model)
+                {"role": "user", "content": prompt}],
+               model=model, task="write", preferred_provider=preferred_provider)
     title, body = _split_title(raw, topic)
 
     floor = int(words * MIN_COMPLETENESS_RATIO)
@@ -166,47 +208,49 @@ def write_article(topic, style="", words=2000, tags_hint="", model=None):
             {"role": "user", "content":
                 f"继续扩写下面这篇文章，补足到 {words} 字左右。只输出新增的 Markdown "
                 f"正文段落，不要重复已有内容，不要输出标题行。\n\n---\n\n{body[:6000]}"},
-        ], model=model)
+        ], model=model, task="write", preferred_provider=preferred_provider)
         if not more.strip():
             break
         body = body.rstrip() + "\n\n" + more.strip()
 
+    actual_model = model or _cfg("AI_MODEL", DEFAULT_MODEL)
     return {"title": title, "content_md": body,
-            "summary": summarize(body, model=model),
-            "tags": suggest_tags(title, body, model=model),
-            "source": "ai", "ai_model": model or _cfg("AI_MODEL", DEFAULT_MODEL),
+            "summary": summarize(body, model=model, preferred_provider=preferred_provider),
+            "tags": suggest_tags(title, body, model=model, preferred_provider=preferred_provider),
+            "source": "ai", "ai_model": actual_model,
             "style_source": str(style_file()) if load_style() else ""}
 
 
-def rewrite(content_md, instruction, model=None):
+def rewrite(content_md, instruction, model=None, preferred_provider=None):
     """按指令改写，比如"改成更口语""补充一个踩坑章节"。"""
     return chat([{"role": "system", "content": system_write()},
                  {"role": "user", "content": f"按这个要求改写下面这篇文章：{instruction}\n\n---\n\n{content_md}"}],
-                model=model)
+                model=model, task="rewrite", preferred_provider=preferred_provider)
 
 
-def polish(content_md, model=None):
+def polish(content_md, model=None, preferred_provider=None):
     """润色：修错别字、顺语句、统一代码块语言标识，不改原意。"""
     return rewrite(content_md, "润色：修错别字和病句、统一代码块语言标识、理顺结构，不要改变原意和篇幅",
-                   model=model)
+                   model=model, preferred_provider=preferred_provider)
 
 
-def summarize(content_md, model=None):
+def summarize(content_md, model=None, preferred_provider=None):
     """生成 50-150 字摘要，各平台发布时用。"""
     try:
         return chat([{"role": "user", "content":
             f"为下面这篇文章写一段 50-150 字的摘要，突出价值，不要复述标题：\n\n{content_md[:6000]}"}],
-            max_tokens=300, model=model)
+            max_tokens=300, model=model, task="summarize", preferred_provider=preferred_provider)
     except Exception:
         return content_md[:100].replace("\n", " ")
 
 
-def suggest_tags(title, content_md, model=None):
+def suggest_tags(title, content_md, model=None, preferred_provider=None):
     """推荐 3-5 个标签，逗号分隔。"""
     try:
         raw = chat([{"role": "user", "content":
             f"为这篇文章推荐 3-5 个中文技术标签，只输出逗号分隔的标签，不要解释：\n"
-            f"标题：{title}\n\n{content_md[:3000]}"}], max_tokens=100, model=model)
+            f"标题：{title}\n\n{content_md[:3000]}"}], max_tokens=100, model=model,
+            task="tags", preferred_provider=preferred_provider)
         tags = [t.strip() for t in raw.replace("，", ",").split(",") if t.strip()]
         return ",".join(tags[:5])
     except Exception:
@@ -214,4 +258,12 @@ def suggest_tags(title, content_md, model=None):
 
 
 def is_ready():
-    return bool(_cfg("AI_API_KEY"))
+    # 兼容 providers 模块：如果 providers 有配置也认为 ready
+    cfg_ready = bool(_cfg("AI_API_KEY"))
+    if cfg_ready:
+        return True
+    try:
+        prov_mod = _get_providers()
+        return prov_mod.is_ready()
+    except Exception:
+        return False

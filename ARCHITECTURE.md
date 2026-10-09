@@ -201,6 +201,10 @@ SQLite 单文件，WAL 模式 + 30s busy_timeout。
 | **版本** | `GET /articles/{id}/versions` · `GET /articles/{id}/versions/{vid}` · `GET /articles/{id}/versions/diff` · `POST /articles/{id}/versions/{vid}/rollback` |
 | **定时** | `GET/POST /schedules` · `GET/PUT /schedules/{sid}` · `POST /schedules/{sid}/pause` · `POST /schedules/{sid}/resume` · `POST /schedules/{sid}/trigger` · `DELETE /schedules/{sid}` |
 | **标签** | `GET /tags` · `GET /tags/trending` · `POST /tags/sync` · `POST /tags/rename` · `POST /tags/merge` · `POST /tags/alias` · `POST /tags/suggest` |
+| **AI模型** | `GET /ai/providers`（多 Provider 列表 + 模型 + 价格级别 + 冷却状态） |
+| **质检** | `POST /articles/{id}/qa` · `POST /qa/analyze`（可读性 + SEO + 重复度 0-100 评分） |
+| **Webhook** | `GET/POST /webhooks` · `PUT/DELETE /webhooks/{id}` · `POST /webhooks/{id}/test` |
+| **通知** | `GET /notifications`（环形缓冲最近事件） |
 | **发布实例** | `GET /publications` · `GET /pending-human` |
 
 交互式文档：`GET /docs`（Swagger UI）/ `GET /redoc`。

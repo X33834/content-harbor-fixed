@@ -23,6 +23,7 @@
             <el-dropdown-item divided command="translate" :icon="Paperclip">AI 翻译</el-dropdown-item>
             <el-dropdown-item command="prompts" :icon="Picture">配图提示</el-dropdown-item>
             <el-dropdown-item command="outline" :icon="List">大纲 / SEO</el-dropdown-item>
+            <el-dropdown-item command="qa" :icon="DataAnalysis">内容质检</el-dropdown-item>
             <el-dropdown-item command="clone" :icon="DocumentCopy">克隆文章</el-dropdown-item>
             <el-dropdown-item divided command="versions" :icon="Clock">版本历史</el-dropdown-item>
           </el-dropdown-menu>
@@ -111,6 +112,36 @@
     <div v-else class="dim padding">还没有版本历史（每次编辑都会自动存一份旧版快照）</div>
   </el-drawer>
 
+  <!-- 内容质检 -->
+  <el-dialog v-model="qaDialog" title="内容质检报告" width="560px">
+    <div v-if="qaLoading" class="dim padding">质检中…</div>
+    <div v-else-if="qaResult">
+      <div class="qa-overview">
+        <div class="qa-total" :class="qaTotalClass">
+          <span class="qa-total-num">{{ qaResult.total }}</span>
+          <span class="qa-total-label">{{ qaResult.label }}</span>
+        </div>
+        <div class="qa-sub-scores">
+          <div class="qa-sub">可读性<b>{{ qaResult.readability.score }}</b></div>
+          <div class="qa-sub">SEO<b>{{ qaResult.seo.score }}</b></div>
+          <div class="qa-sub">重复<b>{{ qaResult.duplicates.length }}篇</b></div>
+        </div>
+      </div>
+      <div v-if="qaResult.tips.length" class="qa-tips">
+        <div class="qa-section-title">改进建议</div>
+        <ul>
+          <li v-for="(t, i) in qaResult.tips" :key="i">{{ t }}</li>
+        </ul>
+      </div>
+      <div v-if="qaResult.duplicates.length" class="qa-dup">
+        <div class="qa-section-title">库内相似文章</div>
+        <div v-for="d in qaResult.duplicates" :key="d.id" class="qa-dup-item">
+          #{{ d.id }} {{ d.title }} · 相似度 {{ (d.similarity * 100).toFixed(0) }}%
+        </div>
+      </div>
+    </div>
+  </el-dialog>
+
   <!-- AI 工具面板 -->
   <el-dialog v-model="aiToolDialog" :title="aiToolTitle" width="600px">
     <div v-if="aiToolLoading" class="dim padding">AI 生成中…</div>
@@ -133,7 +164,7 @@
       <div v-else-if="aiToolKind === 'outline'">
         <ol class="outline-list">
           <li v-for="(o, i) in (aiToolData.outline || [])" :key="i"
-              :style="{ marginLeft: (o.level - 1) * 16 + 'px' }}">
+              :style="{ 'margin-left': (o.level - 1) * 16 + 'px' }">
             {{ o.title }}
           </li>
         </ol>
@@ -156,7 +187,7 @@ import { computed, ref, watch } from 'vue'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { Check, PriceTag, Aim, Brush, Menu, Edit, Operation, View, Promotion, Refresh,
-         Paperclip, Picture, List, DocumentCopy, Clock } from '@element-plus/icons-vue'
+         Paperclip, Picture, List, DocumentCopy, Clock, DataAnalysis } from '@element-plus/icons-vue'
 import { useBreakpoint } from '@/composables/useBreakpoint'
 import { useHubStore } from '@/stores/hub'
 
@@ -185,6 +216,10 @@ const toolbars = ref(['bold', 'italic', 'strikethrough', 'heading',
   'revoke', 'next', 'preview', 'expand'])
 
 const chars = computed(() => (props.article?.content_md || '').length)
+const qaTotalClass = computed(() => {
+  const t = qaResult.value?.total ?? 0
+  return 'qa-' + (t >= 70 ? 'good' : t >= 50 ? 'ok' : 'bad')
+})
 const touch = () => emit('touch')
 
 // 版本历史抽屉状态
@@ -215,6 +250,21 @@ async function rollback(v) {
   if (!props.article?.id) return
   await hub.rollbackVersion(props.article.id, v.id)
   versionsList.value = await hub.loadVersions(props.article.id)
+}
+
+// 内容质检
+const qaDialog = ref(false)
+const qaLoading = ref(false)
+const qaResult = ref(null)
+async function openQa() {
+  if (!props.article?.id) return
+  qaDialog.value = true
+  qaLoading.value = true
+  qaResult.value = null
+  try {
+    qaResult.value = await hub.qaArticle(props.article.id)
+  } catch { qaResult.value = null }
+  qaLoading.value = false
 }
 
 // 打开 AI 工具面板
@@ -269,6 +319,7 @@ function onMore(cmd) {
     case 'prompts': openAiTool('prompts'); break
     case 'outline': openAiTool('outline'); break
     case 'seo': openAiTool('seo'); break
+    case 'qa': openQa(); break
     case 'clone': hub.cloneArticle(props.article.id); break
     case 'versions': openVersions(); break
   }
@@ -360,6 +411,30 @@ function onMore(cmd) {
 .outline-list { padding-left: 18px; color: var(--tx-2); font-size: 13px;
   li { line-height: 1.8; }
 }
+
+// 内容质检
+.qa-overview { display: flex; align-items: center; gap: 18px; margin-bottom: 14px; }
+.qa-total {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 88px; height: 88px; border-radius: 50%;
+  background: var(--surface-3); border: 2px solid var(--line);
+  .qa-total-num { font-size: 26px; font-weight: 700; }
+  .qa-total-label { font-size: 11px; color: var(--tx-3); }
+  &.qa-good { border-color: #10b981; .qa-total-num { color: #10b981; } }
+  &.qa-ok { border-color: #f59e0b; .qa-total-num { color: #f59e0b; } }
+  &.qa-bad { border-color: #ef4444; .qa-total-num { color: #ef4444; } }
+}
+.qa-sub-scores { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.qa-sub {
+  display: flex; justify-content: space-between; font-size: 12px; color: var(--tx-3);
+  padding: 4px 10px; background: var(--surface-3); border-radius: 6px;
+  b { color: var(--tx-1); font-size: 13px; }
+}
+.qa-section-title { font-size: 12px; color: var(--tx-1); font-weight: 600; margin: 12px 0 6px; }
+.qa-tips ul { padding-left: 18px; font-size: 12px; color: var(--tx-3);
+  li { line-height: 1.7; }
+}
+.qa-dup-item { font-size: 11px; color: var(--tx-3); padding: 3px 0; }
 
 .dim { color: var(--tx-4); }
 .padding { padding: 20px; }

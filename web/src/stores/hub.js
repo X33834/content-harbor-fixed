@@ -18,6 +18,7 @@ export const useHubStore = defineStore('hub', {
     accounts: [],
     stats: {},
     aiReady: false,
+    aiProviders: [],    // 可用的 AI Provider + 模型列表
     pendingHuman: [],   // 需要人工处理的发布实例（掘金草稿等人点发布）
     tasks: [],          // 统一任务列表（替代 runs）
     loginTasks: {},     // platform -> {task_id, status}，登录轮询状态
@@ -29,7 +30,9 @@ export const useHubStore = defineStore('hub', {
     loadingList: false,
     view: localStorage.getItem('hub_view') || 'write',   // write=写作 / manage=管理
     schedules: [],                                       // 定时任务列表
-    tags: []                                             // 标签统计
+    tags: [],                                            // 标签统计
+    webhooks: [],                                        // 注册的 webhook
+    notifications: []                                    // 最近通知
   }),
 
   getters: {
@@ -320,14 +323,28 @@ export const useHubStore = defineStore('hub', {
       }).catch(() => {})
     },
 
+    // ---------------- 内容质检 ----------------
+    async qaArticle(aid) { return await api.qaArticle(aid) },
+    async qaAnalyze(contentMd, title, summary, tags) {
+      return await api.qaAnalyze(contentMd, title, summary, tags)
+    },
+
+    // ---------------- AI Provider 管理 ----------------
+    async loadAiProviders() {
+      try {
+        this.aiProviders = await api.aiProviders() || []
+        return this.aiProviders
+      } catch { return [] }
+    },
+
     // ---------------- AI 增强 ----------------
-    async aiTranslate(id, lang = 'en') {
-      const r = await api.aiTranslate(id, lang)
+    async aiTranslate(id, lang = 'en', model, provider) {
+      const r = await api.aiTranslate(id, lang, model, provider)
       ElMessage.success(`已翻译为 ${lang}（${r.chars} 字）`)
       return r
     },
-    async aiImagePrompts(id, n = 3) {
-      const r = await api.aiImagePrompts(id, n)
+    async aiImagePrompts(id, n = 3, model, provider) {
+      const r = await api.aiImagePrompts(id, n, model, provider)
       return r
     },
     async aiOutline(id) {
@@ -417,6 +434,35 @@ export const useHubStore = defineStore('hub', {
       await api.deleteSchedule(sid)
       ElMessage.success('已删除')
       await this.loadSchedules()
+    },
+
+    // ---------------- Webhook / 事件通知 ----------------
+    async loadWebhooks() {
+      this.webhooks = await api.webhooks() || []
+      return this.webhooks
+    },
+    async createWebhook(data) {
+      const r = await api.createWebhook(data)
+      ElMessage.success('Webhook 注册成功')
+      await this.loadWebhooks()
+      return r
+    },
+    async updateWebhook(wid, data) {
+      await api.updateWebhook(wid, data)
+      await this.loadWebhooks()
+    },
+    async deleteWebhook(wid) {
+      await api.deleteWebhook(wid)
+      ElMessage.success('已删除')
+      await this.loadWebhooks()
+    },
+    async testWebhook(wid) {
+      await api.testWebhook(wid)
+      ElMessage.success('测试事件已发送')
+    },
+    async loadNotifications() {
+      this.notifications = await api.notifications() || []
+      return this.notifications
     }
   }
 })
