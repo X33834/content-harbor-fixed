@@ -33,11 +33,18 @@
   --warn: #E8964A;   // 警告（暖橙）
   --bad:  #E05252;   // 失败（柔红）
 
-  // 字体（全部无衬线，清爽现代）
-  --font-serif: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-sans:  'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-disp:  'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
-  --font-mono:  ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  // 字体（系统字体栈 + 中文优化，零外部请求）
+  // 无衬线栈：英文用 SF Pro / Segoe UI，中文用苹方 / 微软雅黑
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
+               'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', sans-serif;
+  // 品牌展示字体（略收紧 letter-spacing，大标题更利落）
+  --font-disp: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI',
+               'PingFang SC', 'Microsoft YaHei', sans-serif;
+  // 品牌名书法体回退（如有本地宋体则用，否则优雅降级到 sans）
+  --font-serif: 'Songti SC', 'STSong', 'Noto Serif SC', serif;
+  // 代码 / 数据
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono',
+               'Fira Code', Consolas, 'Liberation Mono', monospace;
 
   // 字号系统
   --fs-xs: 11px;

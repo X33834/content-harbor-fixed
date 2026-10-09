@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.1] - 2026-10-09
+
+### 文档打磨
+
+- **README.md 全面重写**：修复所有过时引用（`deplay` → `deploy`、`/api/v1` CRUD 路由、MCP 入口、`markdown-it` → `md-editor-v3`、`server/static` 构建路径）；删除 E2E 测试引用（测试套件已拆除）；更新仓库地址为多镜像表格
+- **README.en.md 全面重写**：与中文版内容同步，专注国际开发者视角
+- **ARCHITECTURE.md 全面重写**：修复目录结构（不再列举 `xiaohongshu` / `wechat` 等不存在的适配器）、修复 API 路径（删除 `/api/v1/*` 引用）、新增 ADR 设计决策一节（统一任务引擎、Patchright、单实例浏览器、双库合一、异步轮询）
+- **CHANGELOG.md 同步更新**
+
+### 浏览器启动修复
+
+- `browser.py` `_find_chrome()` 新增 `/opt/playwright` 搜索根和 `chromium-*/chrome-linux64/chrome` 模式，解决沙箱环境内 Chromium 二进制找不到的问题
+
+### 前端组件打磨
+
+- 字体系统重构：`--font-serif` / `--font-disp` 语义化命名，真正区分展示体与代码块；中英字体栈优化（零外部请求）
+- 删除 `App.vue` 中不再使用的 `.fab` 浮动按钮样式残留
+- `vite.config.js` 修正 `manualChunks.md` 从 `markdown-it` → `md-editor-v3`；开发代理目标改为 `:8000`（当前默认端口）
+
 ## [0.4.0-fix] - 2026-10-09
 
 ### 重大清理

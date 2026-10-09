@@ -33,7 +33,7 @@ export default defineConfig(({ command }) => ({
         manualChunks: {
           vue: ['vue', 'pinia', 'axios'],
           element: ['element-plus', '@element-plus/icons-vue'],
-          md: ['markdown-it']
+          md: ['md-editor-v3']
         }
       }
     }
@@ -42,7 +42,7 @@ export default defineConfig(({ command }) => ({
   server: {
     // dev 模式代理后端，避免 CORS
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8800', changeOrigin: true, rewrite: p => p.replace(/^\/api/, '') }
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true }
     }
   }
 }))

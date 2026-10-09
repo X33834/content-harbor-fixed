@@ -138,27 +138,4 @@ async function onPolish() {
   align-items: center;
   justify-content: center;
 }
-
-.fab {
-  position: fixed;
-  right: 16px;
-  bottom: 20px;
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 11px 20px;
-  border-radius: 24px;
-  background: var(--accent);
-  color: #fff;
-  font-size: var(--fs-md);
-  font-weight: 500;
-  box-shadow: var(--shadow-lg);
-  cursor: pointer;
-  user-select: none;
-  transition: background .18s var(--ease-out), transform .18s var(--ease-out);
-
-  &:hover { background: var(--accent-hi); }
-  &:active { transform: scale(.97); }
-}
 </style>
