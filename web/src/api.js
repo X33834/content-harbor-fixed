@@ -69,5 +69,38 @@ export const api = {
   aiPolish: (id) => http.post(`/articles/${id}/ai-polish`),
   aiStatus: () => http.get('/ai/status'),
 
+  // ---------------- AI 增强工具 ----------------
+  aiTranslate: (id, lang = 'en') => http.post(`/articles/${id}/ai-translate`, null, { params: { target_lang: lang } }),
+  aiImagePrompts: (id, n = 3) => http.get(`/articles/${id}/ai-image-prompts`, { params: { n } }),
+  aiOutline: (id) => http.get(`/articles/${id}/ai-outline`),
+  aiSeo: (id) => http.get(`/articles/${id}/ai-seo`),
+  cloneArticle: (id) => http.post(`/articles/${id}/clone`),
+  aiTemplates: () => http.get('/ai/templates'),
+  aiWriteTemplate: (data) => http.post('/ai/write-template', null, { params: data }),
+
+  // ---------------- 版本历史 ----------------
+  versions: (id, limit = 50) => http.get(`/articles/${id}/versions`, { params: { limit } }),
+  version: (id, vid) => http.get(`/articles/${id}/versions/${vid}`),
+  versionDiff: (id, v1, v2) => http.get(`/articles/${id}/versions/diff`, { params: { v1, v2 } }),
+  rollback: (id, vid) => http.post(`/articles/${id}/versions/${vid}/rollback`),
+
+  // ---------------- 定时发布调度器 ----------------
+  schedules: (includeDisabled = false) => http.get('/schedules', { params: { include_disabled: includeDisabled } }),
+  createSchedule: (data) => http.post('/schedules', data),
+  updateSchedule: (sid, data) => http.put(`/schedules/${sid}`, data),
+  pauseSchedule: (sid) => http.post(`/schedules/${sid}/pause`),
+  resumeSchedule: (sid) => http.post(`/schedules/${sid}/resume`),
+  triggerSchedule: (sid) => http.post(`/schedules/${sid}/trigger`),
+  deleteSchedule: (sid) => http.delete(`/schedules/${sid}`),
+
+  // ---------------- 标签治理 ----------------
+  tags: (limit = 50, category) => http.get('/tags', { params: { limit, category } }),
+  tagsTrending: (limit = 10) => http.get('/tags/trending', { params: { limit } }),
+  syncTags: () => http.post('/tags/sync'),
+  renameTag: (oldName, newName) => http.post('/tags/rename', null, { params: { old: oldName, new: newName } }),
+  mergeTag: (from, to) => http.post('/tags/merge', null, { params: { _from: from, to } }),
+  addTagAlias: (alias, canonical) => http.post('/tags/alias', null, { params: { alias, canonical } }),
+  suggestTags: (title, contentMd) => http.post('/tags/suggest', null, { params: { title, content_md: contentMd } }),
+
   jobs: () => http.get('/jobs')
 }

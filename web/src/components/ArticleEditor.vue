@@ -20,6 +20,11 @@
                                :class="{ 'is-active-cmd': view === 'preview' }">预览</el-dropdown-item>
             <el-dropdown-item divided command="rewrite" :icon="Aim">AI 改写</el-dropdown-item>
             <el-dropdown-item command="polish" :icon="Brush">AI 润色</el-dropdown-item>
+            <el-dropdown-item divided command="translate" :icon="Paperclip">AI 翻译</el-dropdown-item>
+            <el-dropdown-item command="prompts" :icon="Picture">配图提示</el-dropdown-item>
+            <el-dropdown-item command="outline" :icon="List">大纲 / SEO</el-dropdown-item>
+            <el-dropdown-item command="clone" :icon="DocumentCopy">克隆文章</el-dropdown-item>
+            <el-dropdown-item divided command="versions" :icon="Clock">版本历史</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -84,13 +89,74 @@
       </div>
     </div>
   </div>
+
+  <!-- 版本历史抽屉 -->
+  <el-drawer v-model="versionDrawer" :title="`版本历史 · #${currentId}`" size="520px" direction="rtl">
+    <div v-if="versionsLoading" class="dim padding">加载中…</div>
+    <div v-else-if="versionsList.length" class="ver-list">
+      <div v-for="(v, i) in versionsList" :key="v.id" class="ver-card">
+        <div class="vc-head">
+          <el-tag size="small" :type="versionTagType(v.change_kind)" effect="plain">
+            {{ versionKindLabel(v.change_kind) }}
+          </el-tag>
+          <span class="dim small">{{ fmtVerTime(v.created_at) }}</span>
+          <span class="vc-note">{{ v.change_note || '—' }}</span>
+        </div>
+        <div class="vc-preview">{{ (v.title || '').slice(0, 50) || '（无标题）' }}</div>
+        <div class="vc-ops">
+          <el-button size="small" text @click="rollback(v)" :disabled="i === 0">回滚到此版本</el-button>
+        </div>
+      </div>
+    </div>
+    <div v-else class="dim padding">还没有版本历史（每次编辑都会自动存一份旧版快照）</div>
+  </el-drawer>
+
+  <!-- AI 工具面板 -->
+  <el-dialog v-model="aiToolDialog" :title="aiToolTitle" width="600px">
+    <div v-if="aiToolLoading" class="dim padding">AI 生成中…</div>
+    <div v-else-if="aiToolData">
+      <!-- 翻译结果 -->
+      <div v-if="aiToolKind === 'translate'">
+        <el-alert type="success" :closable="false"
+                  title="翻译完成（可复制后手动粘贴为新文章正文）" show-icon />
+        <pre class="ai-result-box">{{ aiToolData.translated_md }}</pre>
+      </div>
+      <!-- 配图提示 -->
+      <div v-else-if="aiToolKind === 'prompts'">
+        <el-alert type="info" :closable="false" title="复制到 Midjourney / 通义万相 / ComfyUI" />
+        <div v-for="(p, i) in (aiToolData.prompts || [])" :key="i" class="prompt-item">
+          <pre>{{ p }}</pre>
+          <el-button size="small" text @click="copyText(p)">复制</el-button>
+        </div>
+      </div>
+      <!-- 大纲 -->
+      <div v-else-if="aiToolKind === 'outline'">
+        <ol class="outline-list">
+          <li v-for="(o, i) in (aiToolData.outline || [])" :key="i"
+              :style="{ marginLeft: (o.level - 1) * 16 + 'px' }}">
+            {{ o.title }}
+          </li>
+        </ol>
+      </div>
+      <!-- SEO -->
+      <div v-else-if="aiToolKind === 'seo'">
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="SEO 标题">{{ aiToolData.seo_title }}</el-descriptions-item>
+          <el-descriptions-item label="SEO 描述">{{ aiToolData.seo_description }}</el-descriptions-item>
+          <el-descriptions-item label="URL Slug"><code>{{ aiToolData.slug }}</code></el-descriptions-item>
+          <el-descriptions-item label="关键词">{{ aiToolData.keywords }}</el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </div>
+  </el-dialog>
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
-import { Check, PriceTag, Aim, Brush, Menu, Edit, Operation, View, Promotion, Refresh } from '@element-plus/icons-vue'
+import { Check, PriceTag, Aim, Brush, Menu, Edit, Operation, View, Promotion, Refresh,
+         Paperclip, Picture, List, DocumentCopy, Clock } from '@element-plus/icons-vue'
 import { useBreakpoint } from '@/composables/useBreakpoint'
 import { useHubStore } from '@/stores/hub'
 
@@ -121,6 +187,76 @@ const toolbars = ref(['bold', 'italic', 'strikethrough', 'heading',
 const chars = computed(() => (props.article?.content_md || '').length)
 const touch = () => emit('touch')
 
+// 版本历史抽屉状态
+const versionDrawer = ref(false)
+const versionsLoading = ref(false)
+const versionsList = ref([])
+
+// AI 工具面板状态
+const aiToolDialog = ref(false)
+const aiToolTitle = ref('')
+const aiToolLoading = ref(false)
+const aiToolData = ref(null)
+const aiToolKind = ref('')
+
+// 打开版本历史
+async function openVersions() {
+  if (!props.article?.id) return
+  versionDrawer.value = true
+  versionsLoading.value = true
+  try {
+    versionsList.value = await hub.loadVersions(props.article.id)
+  } catch { versionsList.value = [] }
+  versionsLoading.value = false
+}
+
+// 回滚版本
+async function rollback(v) {
+  if (!props.article?.id) return
+  await hub.rollbackVersion(props.article.id, v.id)
+  versionsList.value = await hub.loadVersions(props.article.id)
+}
+
+// 打开 AI 工具面板
+async function openAiTool(kind) {
+  if (!props.article?.id) return
+  aiToolKind.value = kind
+  aiToolDialog.value = true
+  aiToolLoading.value = true
+  aiToolData.value = null
+  const titles = { translate: 'AI 翻译', prompts: '配图提示生成', outline: '文章大纲', seo: 'SEO 元数据' }
+  aiToolTitle.value = titles[kind] || 'AI 工具'
+  try {
+    if (kind === 'translate') {
+      aiToolData.value = await hub.aiTranslate(props.article.id, 'en')
+    } else if (kind === 'prompts') {
+      aiToolData.value = await hub.aiImagePrompts(props.article.id, 3)
+    } else if (kind === 'outline') {
+      aiToolData.value = await hub.aiOutline(props.article.id)
+    } else if (kind === 'seo') {
+      aiToolData.value = await hub.aiSeo(props.article.id)
+    }
+  } catch { aiToolData.value = null }
+  aiToolLoading.value = false
+}
+
+function copyText(t) {
+  navigator.clipboard.writeText(t).catch(() => {})
+}
+
+// 版本历史标签
+const versionKindLabel = (k) =>
+  ({ edit: '编辑', ai_rewrite: 'AI 改写', ai_polish: 'AI 润色',
+     rollback: '回滚', import: '导入', 'pre-rollback': '回滚前快照' }[k] || k)
+const versionTagType = (k) =>
+  k === 'edit' ? 'info' : k === 'ai_rewrite' ? 'primary' : k === 'rollback' ? 'warning' : 'info'
+const fmtVerTime = (ts) => {
+  if (!ts) return '—'
+  const d = new Date(ts * 1000)
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 // 「视图与 AI」下拉：命令分发
 function onMore(cmd) {
   switch (cmd) {
@@ -129,6 +265,12 @@ function onMore(cmd) {
     case 'preview': view.value = 'preview'; break
     case 'rewrite': emit('ai-rewrite'); break
     case 'polish': emit('ai-polish'); break
+    case 'translate': openAiTool('translate'); break
+    case 'prompts': openAiTool('prompts'); break
+    case 'outline': openAiTool('outline'); break
+    case 'seo': openAiTool('seo'); break
+    case 'clone': hub.cloneArticle(props.article.id); break
+    case 'versions': openVersions(); break
   }
 }
 </script>
@@ -194,4 +336,31 @@ function onMore(cmd) {
     overflow: hidden;
   }
 }
+
+// 版本历史
+.ver-list { display: flex; flex-direction: column; gap: 10px; }
+.ver-card {
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+  .vc-head { display: flex; align-items: center; gap: 10px; }
+  .vc-note { color: var(--tx-3); font-size: 11px; flex: 1; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .vc-preview { font-size: 12px; color: var(--tx-2); margin: 6px 0; }
+}
+
+// AI 工具
+.ai-result-box {
+  background: var(--surface-3); border-radius: 8px; padding: 10px;
+  font-size: 12px; color: var(--tx-2); max-height: 360px; overflow: auto;
+  white-space: pre-wrap; word-break: break-all; margin-top: 10px;
+}
+.prompt-item {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 8px;
+  pre { font-size: 12px; color: var(--tx-2); margin: 0 0 6px; word-break: break-all; white-space: pre-wrap; }
+}
+.outline-list { padding-left: 18px; color: var(--tx-2); font-size: 13px;
+  li { line-height: 1.8; }
+}
+
+.dim { color: var(--tx-4); }
+.padding { padding: 20px; }
 </style>

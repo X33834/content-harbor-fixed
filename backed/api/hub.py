@@ -461,6 +461,215 @@ def jobs(limit: int = 50):
     return [dict(r) for r in db.list_jobs(get_hub().conn, limit)]
 
 
+# ==================== 定时发布调度器 ====================
+
+class ScheduleIn(BaseModel):
+    article_id: int
+    platforms: List[str]
+    account: str = "default"
+    draft_only: bool = False
+    schedule_type: str = "once"        # once/daily/weekly/cron
+    schedule_expr: str = ""            # 表达式
+    title: str = ""
+
+
+class SchedulePatch(BaseModel):
+    title: Optional[str] = None
+    platforms: Optional[List[str]] = None
+    account: Optional[str] = None
+    draft_only: Optional[bool] = None
+    schedule_type: Optional[str] = None
+    schedule_expr: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+@hub_router.get("/schedules")
+def schedules_list(include_disabled: bool = False):
+    return get_hub().scheduler.list_all(include_disabled=include_disabled)
+
+
+@hub_router.post("/schedules")
+def schedules_create(body: ScheduleIn):
+    sid = get_hub().scheduler.create(
+        body.article_id, body.platforms, body.account, body.draft_only,
+        body.schedule_type, body.schedule_expr, body.title)
+    return {"id": sid, **get_hub().scheduler.get(sid)}
+
+
+@hub_router.get("/schedules/{sid}")
+def schedules_get(sid: int):
+    s = get_hub().scheduler.get(sid)
+    if not s:
+        raise HTTPException(404, "定时任务不存在")
+    return s
+
+
+@hub_router.put("/schedules/{sid}")
+def schedules_update(sid: int, body: SchedulePatch):
+    data = {k: v for k, v in body.dict().items() if v is not None}
+    ok = get_hub().scheduler.update(sid, **data)
+    return {"ok": ok, **get_hub().scheduler.get(sid)}
+
+
+@hub_router.post("/schedules/{sid}/pause")
+def schedules_pause(sid: int):
+    return get_hub().scheduler.pause(sid)
+
+
+@hub_router.post("/schedules/{sid}/resume")
+def schedules_resume(sid: int):
+    return get_hub().scheduler.resume(sid)
+
+
+@hub_router.post("/schedules/{sid}/trigger")
+def schedules_trigger(sid: int):
+    """手动立即触发一次（不改调度计划）。"""
+    return get_hub().scheduler.trigger_now(sid)
+
+
+@hub_router.delete("/schedules/{sid}")
+def schedules_delete(sid: int):
+    return get_hub().scheduler.delete(sid)
+
+
+# ==================== 文章版本历史 ====================
+
+@hub_router.get("/articles/{aid}/versions")
+def versions_list(aid: int, limit: int = 50):
+    from service.publishing.versions import list_versions
+    return list_versions(get_hub().conn, aid, limit=limit)
+
+
+@hub_router.get("/articles/{aid}/versions/{vid}")
+def versions_get(aid: int, vid: int):
+    from service.publishing.versions import get_version
+    v = get_version(get_hub().conn, vid)
+    if not v:
+        raise HTTPException(404, "版本不存在")
+    return v
+
+
+@hub_router.get("/articles/{aid}/versions/diff")
+def versions_diff(aid: int, v1: int, v2: int):
+    """对比两个版本的差异。"""
+    from service.publishing.versions import diff_versions
+    return diff_versions(get_hub().conn, v1, v2)
+
+
+@hub_router.post("/articles/{aid}/versions/{vid}/rollback")
+def versions_rollback(aid: int, vid: int):
+    """回滚文章到指定版本。"""
+    from service.publishing.versions import rollback
+    ok, msg = rollback(get_hub().conn, vid)
+    if not ok:
+        raise HTTPException(400, msg)
+    return {"ok": True, "message": msg}
+
+
+# ==================== AI 增强工具 ====================
+
+@hub_router.post("/articles/{aid}/ai-translate")
+def ai_translate(aid: int, target_lang: str = "en"):
+    """翻译文章到目标语言。target_lang: en/ja/ko/fr/de。"""
+    return get_hub().ai_translate(aid, target_lang)
+
+
+@hub_router.get("/articles/{aid}/ai-image-prompts")
+def ai_image_prompts(aid: int, n: int = 3):
+    """根据文章内容生成文生图 prompt。"""
+    return get_hub().ai_image_prompts(aid, n)
+
+
+@hub_router.get("/articles/{aid}/ai-outline")
+def ai_outline(aid: int):
+    """提炼文章大纲。"""
+    return get_hub().ai_outline(aid)
+
+
+@hub_router.get("/articles/{aid}/ai-seo")
+def ai_seo(aid: int):
+    """生成 SEO 元数据。"""
+    return get_hub().ai_seo(aid)
+
+
+@hub_router.post("/articles/{aid}/clone")
+def article_clone(aid: int):
+    """克隆文章。返回新文章 ID。"""
+    return get_hub().clone(aid)
+
+
+@hub_router.get("/ai/templates")
+def ai_templates():
+    """列出所有可用写作模板。"""
+    return get_hub().list_ai_templates()
+
+
+@hub_router.post("/ai/write-template")
+def ai_write_template(
+    topic: str, template: str = "", style: str = "",
+    words: int = 2000, tags_hint: str = ""
+):
+    """用预置模板 AI 写文章。"""
+    art = get_hub().ai_write_with_template(
+        topic, template, style=style, words=words, tags_hint=tags_hint)
+    aid = get_hub().create(art["title"], art["content_md"],
+                           summary=art["summary"], tags=art["tags"],
+                           source="ai", ai_model=art.get("ai_model", ""))
+    return {"id": aid, "title": art["title"], "summary": art["summary"]}
+
+
+# ==================== 标签治理 ====================
+
+@hub_router.get("/tags")
+def tags_list(limit: int = 50, category: str = None):
+    from service.publishing.tags import list_tags
+    return list_tags(get_hub().conn, limit=limit, category=category or None)
+
+
+@hub_router.get("/tags/trending")
+def tags_trending(limit: int = 10):
+    from service.publishing.tags import trending
+    return trending(get_hub().conn, limit=limit)
+
+
+@hub_router.post("/tags/sync")
+def tags_sync():
+    """从 articles 重建标签统计。"""
+    from service.publishing.tags import sync_from_articles
+    return sync_from_articles(get_hub().conn)
+
+
+@hub_router.post("/tags/rename")
+def tags_rename(old: str, new: str):
+    from service.publishing.tags import rename_tag
+    return rename_tag(get_hub().conn, old, new)
+
+
+@hub_router.post("/tags/merge")
+def tags_merge(_from: str = "", to: str = ""):
+    """合并标签：_from -> to（_from 被合并消失，to 保留）。"""
+    from service.publishing.tags import merge_tags
+    if not _from or not to:
+        raise HTTPException(422, "from 和 to 必填")
+    return merge_tags(get_hub().conn, _from, to)
+
+
+@hub_router.post("/tags/alias")
+def tags_alias(alias: str = "", canonical: str = ""):
+    """添加标签别名：alias 出现时自动替换成 canonical。"""
+    from service.publishing.tags import add_alias
+    if not alias or not canonical:
+        raise HTTPException(422, "alias 和 canonical 必填")
+    return add_alias(get_hub().conn, alias, canonical)
+
+
+@hub_router.post("/tags/suggest")
+def tags_suggest(title: str = "", content_md: str = ""):
+    """根据标题+正文推荐 3-5 个标签。"""
+    from service.publishing.tags import suggest_for_article
+    return {"tags": suggest_for_article(get_hub().conn, title or "", content_md or "")}
+
+
 # ---------------- 可观测性端点 ----------------
 
 @hub_router.get("/metrics")

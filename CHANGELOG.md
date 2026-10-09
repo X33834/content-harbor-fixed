@@ -1,5 +1,49 @@
 # Changelog
 
+---
+
+## [0.5.0] - 2026-10-09
+
+### 新增：AI 工作流完整工具链
+
+- **AI 翻译**：`ai_translate` — Markdown 文章翻译（保留代码块不动）到 en/ja/ko/fr/de
+- **配图提示生成**：`ai_image_prompts` — 从正文提炼 3 个英文文生图 prompt（兼容 SDXL/Flux/DALL·E）
+- **大纲提炼**：`ai_outline` — 从 Markdown 内容提取标题层级树
+- **SEO 元数据**：`ai_seo` — 自动生成 seo_title / seo_description / slug / keywords
+- **文章克隆**：`clone` — 复制已有文章为新草稿
+- **写作模板**：4 个预置模板（教程/观点/深度剖析/资讯简评）
+
+### 新增：定时发布调度器
+
+- 守护线程每 30 秒轮询 `scheduled_tasks` 表，投递到 TaskManager
+- 支持 once / daily / weekly / cron 四种调度类型
+- CLI: `schedule-add` / `schedule-list` / `schedule-del` / `schedule-trigger`
+
+### 新增：文章版本管理
+
+- 改文章前自动快照到 `version_history` 表（sha256 去重）
+- 回滚 / 行级 diff / AI 改写润色前自动存版本
+- CLI: `versions` / `rollback`
+
+### 新增：标签治理
+
+- `tag_stats` 表 + `alias_map` 同义合并
+- 合并 / 重命名 / 别名三步治理 + 词云展示
+- CLI: `tags` / `tag-sync` / `tag-rename`
+
+### 前端
+
+- 编辑器「视图与 AI」下拉扩展（翻译/配图/大纲/SEO/克隆/版本历史）
+- 新 `VersionDrawer` + `AIToolDialog` 组件
+- ManagePanel 新增「定时任务」+「标签治理」标签页
+
+### 文档
+
+- ARCHITECTURE.md 新增 D6-D9 + API 路径总览
+- CHANGELOG.md 本条目
+
+---
+
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

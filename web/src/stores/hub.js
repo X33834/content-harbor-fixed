@@ -27,7 +27,9 @@ export const useHubStore = defineStore('hub', {
     saving: false,
     publishing: false,
     loadingList: false,
-    view: localStorage.getItem('hub_view') || 'write'   // write=写作 / manage=管理
+    view: localStorage.getItem('hub_view') || 'write',   // write=写作 / manage=管理
+    schedules: [],                                       // 定时任务列表
+    tags: []                                             // 标签统计
   }),
 
   getters: {
@@ -316,6 +318,105 @@ export const useHubStore = defineStore('hub', {
       this.waitTask(t.task_id, 900000).then(() => {
         ElMessage.success('平台页已关闭。如还需人工步骤，到任务中心处理')
       }).catch(() => {})
+    },
+
+    // ---------------- AI 增强 ----------------
+    async aiTranslate(id, lang = 'en') {
+      const r = await api.aiTranslate(id, lang)
+      ElMessage.success(`已翻译为 ${lang}（${r.chars} 字）`)
+      return r
+    },
+    async aiImagePrompts(id, n = 3) {
+      const r = await api.aiImagePrompts(id, n)
+      return r
+    },
+    async aiOutline(id) {
+      return await api.aiOutline(id)
+    },
+    async aiSeo(id) {
+      return await api.aiSeo(id)
+    },
+    async cloneArticle(id) {
+      const r = await api.cloneArticle(id)
+      ElMessage.success(`已克隆为「${r.title}」（#${r.new_id}）`)
+      await this.loadList()
+      return r
+    },
+    async listAiTemplates() {
+      return await api.aiTemplates()
+    },
+
+    // ---------------- 版本历史 ----------------
+    async loadVersions(aid) {
+      return await api.versions(aid)
+    },
+    async rollbackVersion(aid, vid) {
+      const r = await api.rollback(aid, vid)
+      ElMessage.success(r.message || '已回滚')
+      await this.open(aid)
+      return r
+    },
+    async versionDiff(aid, v1, v2) {
+      return await api.versionDiff(aid, v1, v2)
+    },
+
+    // ---------------- 标签治理 ----------------
+    async loadTags(limit = 50) {
+      return await api.tags(limit)
+    },
+    async syncTags() {
+      const r = await api.syncTags()
+      ElMessage.success(`标签重新统计完成：${r.synced} 个标签`)
+      return r
+    },
+    async renameTag(oldName, newName) {
+      const r = await api.renameTag(oldName, newName)
+      ElMessage.success(`已将「${oldName}」重命名为「${newName}」（影响 ${r.affected} 篇文章）`)
+      return r
+    },
+    async mergeTag(from, to) {
+      const r = await api.mergeTag(from, to)
+      ElMessage.success(`已合并「${from}」→「${to}」（影响 ${r.affected} 篇文章）`)
+      return r
+    },
+    async suggestTags(title, contentMd) {
+      return await api.suggestTags(title, contentMd)
+    },
+
+    // ---------------- 定时发布调度器 ----------------
+    async loadSchedules() {
+      this.schedules = await api.schedules(true) || []
+    },
+    async createSchedule(data) {
+      const r = await api.createSchedule(data)
+      ElMessage.success(`定时任务已创建（#${r.id}）`)
+      await this.loadSchedules()
+      return r
+    },
+    async updateSchedule(sid, data) {
+      const r = await api.updateSchedule(sid, data)
+      await this.loadSchedules()
+      return r
+    },
+    async pauseSchedule(sid) {
+      await api.pauseSchedule(sid)
+      ElMessage.success('已暂停')
+      await this.loadSchedules()
+    },
+    async resumeSchedule(sid) {
+      await api.resumeSchedule(sid)
+      ElMessage.success('已启用')
+      await this.loadSchedules()
+    },
+    async triggerSchedule(sid) {
+      await api.triggerSchedule(sid)
+      ElMessage.success('已触发执行')
+      await this.loadSchedules()
+    },
+    async deleteSchedule(sid) {
+      await api.deleteSchedule(sid)
+      ElMessage.success('已删除')
+      await this.loadSchedules()
     }
   }
 })

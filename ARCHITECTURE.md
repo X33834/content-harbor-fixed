@@ -197,6 +197,10 @@ SQLite 单文件，WAL 模式 + 30s busy_timeout。
 | **账号** | `GET /accounts` · `GET /accounts/{p}/check` · `POST /accounts/{p}/login` · `DELETE /accounts/{p}` |
 | **账号+** | `GET /accounts/{p}/diagnose` · `POST /accounts/{p}/solve-captcha` · `POST /accounts/{p}/assist` · `POST /refresh/{p}` |
 | **AI** | `POST /ai/write` · `POST /articles/{id}/ai-rewrite` · `POST /articles/{id}/ai-polish` · `GET /ai/status` · `GET /ai/gate` |
+| **AI增强** | `POST /articles/{id}/ai-translate` · `GET /articles/{id}/ai-image-prompts` · `GET /articles/{id}/ai-outline` · `GET /articles/{id}/ai-seo` · `POST /articles/{id}/clone` · `GET /ai/templates` |
+| **版本** | `GET /articles/{id}/versions` · `GET /articles/{id}/versions/{vid}` · `GET /articles/{id}/versions/diff` · `POST /articles/{id}/versions/{vid}/rollback` |
+| **定时** | `GET/POST /schedules` · `GET/PUT /schedules/{sid}` · `POST /schedules/{sid}/pause` · `POST /schedules/{sid}/resume` · `POST /schedules/{sid}/trigger` · `DELETE /schedules/{sid}` |
+| **标签** | `GET /tags` · `GET /tags/trending` · `POST /tags/sync` · `POST /tags/rename` · `POST /tags/merge` · `POST /tags/alias` · `POST /tags/suggest` |
 | **发布实例** | `GET /publications` · `GET /pending-human` |
 
 交互式文档：`GET /docs`（Swagger UI）/ `GET /redoc`。
@@ -224,7 +228,24 @@ TaskManager 100 行实现同等功能 + SQLite 持久化 + 进程重启恢复。
 原版拆 workflow.db + hub.db，状态分散。现在统一到 SQLite 单文件，WAL + RLock
 串行化 + busy_timeout 30s，零外部依赖。
 
-### D5: 异步任务 + 轮询
+### D6: AIGC 合规四道闸门
 
-所有 >5s 的操作（发布/更新/登录/同步 浏览器操作不可避免）立即返回 `task_id`，
-前端 2s 轮询一次。比 WebSocket / SSE 简单，浏览器兼容性最广。
+1. **安全扫描**：高危词（政治/色情/违法/恶意）命中直接拒发
+2. **AIGC 标识**：`source=ai` 的文章强制在 ext 打 `aigc:true` + 模型名 + 文末显式声明
+3. **双模型审查**：配了 `REVIEW_MODEL` 走第二模型审；未配走本地 heuristic（篇幅/占位符/代码块标注）
+4. **发布闸门**：AI 源文章强制 `draft_only`，禁止直接上线；须人工二次确认后才可正式发布
+
+### D7: 版本历史无需 Git
+
+改文章前自动 snapshot 到 `version_history` 表（行级 diff + 全文按 sha 去重）。
+回滚本身也是一条新版本记录，所以"回滚的回滚"就是恢复——无覆盖式破坏。
+
+### D8: 定时发布不引 Celery/APScheduler
+
+30 秒轮询 `scheduled_tasks` 表 + 串行投递到 TaskManager，一次性线程（daemon=True）。
+一次性任务执行完自动 disable，`cron` 表达式走手撸最小 5 段解析（*/n 步长 + 逗号 + 连字符）。
+
+### D9: 标签治理不引 NLP 库
+
+本地 `tag_stats` 表记次数 + `config.json` 存 `alias_map` 同义合并规则。
+分类靠关键词白名单（语言/框架/领域/其他），AI 推荐只补全本地 Top 20 高频之外的缺口。

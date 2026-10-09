@@ -16,6 +16,8 @@ import hashlib
 
 from service.publishing import db
 from service.publishing.tasks import TaskManager
+from service.publishing.scheduler import Scheduler, init_scheduler
+from service.publishing.versions import capture as ver_capture, init_versions
 from service.publishing.adapters.base import PlatformError, get_adapter
 
 
@@ -45,11 +47,15 @@ class Hub:
     def __init__(self, headless=True):
         self.conn = db.connect()
         self.headless = headless
+        # 版本历史：每次 edit/AI 改写前自动存旧版快照（时光机回滚能力）
+        init_versions(self.conn)
         # 演示模式（DEMO=1）：不开浏览器、不调外部 API，登录/发布/更新/AI 写稿
         # 全部模拟成功，用于产品演示与宣传片录制。任务引擎照常真实运转。
         self.demo = os.environ.get("DEMO") == "1"
         # 统一任务引擎：REST/MCP 的登录、发布、更新、同步全部走它（重构第一刀）
         self.tasks = TaskManager(self, self.conn)
+        # 定时发布调度器：伴随 Hub 启停，轮询 scheduled_tasks 表投递到 TaskManager
+        self.scheduler = init_scheduler(self)
         # 风控：平台间隔 + 文章间隔，别调太小，被限流了别来找我
         # 演示模式下不需要风控延迟，直接归零让流程顺畅
         self.delay_platform = (0, 0) if self.demo else (8, 20)
@@ -119,6 +125,10 @@ class Hub:
 
     def close_all(self):
         """进程退出前把池里所有浏览器关干净（atexit 兜底，CLI/serve 都生效）。"""
+        try:
+            self.scheduler.stop()
+        except Exception:
+            pass
         try:
             self.tasks.close()
         except Exception:
@@ -401,7 +411,13 @@ class Hub:
         return db.create_article(self.conn, title, content_md, **kw)
 
     def edit(self, article_id, **kw):
-        """改文章。内容一改，已发布实例自动标成 pending，等 sync_pending 去同步。"""
+        """改文章。内容一改，已发布实例自动标成 pending，等 sync_pending 去同步。
+        编辑前先 snapshot 一份旧版本到 version_history（误改可回滚）。"""
+        art = db.get_article(self.conn, article_id)
+        if art and ("content_md" in kw or "title" in kw):
+            # 改内容前存版本快照（只在真正改动内容时触发）
+            ver_capture(dict(art), change_kind="edit",
+                        change_note="手工编辑", created_by="human")
         ok = db.update_article(self.conn, article_id, **kw)
         pending = db.get_pending_updates(self.conn)
         return ok, len(pending)
@@ -566,11 +582,13 @@ class Hub:
         return out
 
     def ai_rewrite(self, article_id, instruction, publish_to=None):
-        """AI 改写已有文章，改完自动标记待同步。"""
+        """AI 改写已有文章，改完自动标记待同步。改写前存版本快照（可回滚）。"""
         from service.publishing import ai as ai_mod
         art = self.get(article_id)
         if not art:
             raise ValueError(f"文章 {article_id} 不存在")
+        ver_capture(art, change_kind="ai_rewrite",
+                    change_note=f"AI 改写: {instruction[:80]}", created_by="ai")
         new_md = ai_mod.rewrite(art["content_md"], instruction)
         db.update_article(self.conn, article_id, content_md=new_md)
         out = {"id": article_id, "chars": len(new_md),
@@ -580,13 +598,76 @@ class Hub:
         return out
 
     def ai_polish(self, article_id):
+        """AI 润色文章。润色前存版本快照（可回滚）。"""
         from service.publishing import ai as ai_mod
         art = self.get(article_id)
         if not art:
             raise ValueError(f"文章 {article_id} 不存在")
+        ver_capture(art, change_kind="ai_polish",
+                    change_note="AI 润色", created_by="ai")
         new_md = ai_mod.polish(art["content_md"])
         db.update_article(self.conn, article_id, content_md=new_md)
         return {"id": article_id, "pending_sync": len(db.get_pending_updates(self.conn))}
+
+    # ---------------- AI 增强工具（翻译/配图/大纲/SEO/克隆）----------------
+
+    def ai_translate(self, article_id, target_lang="en"):
+        """翻译文章到目标语言。语言代码：en/ja/ko/fr/de。"""
+        from service.publishing.ai_enhancements import translate
+        art = self.get(article_id)
+        if not art:
+            raise ValueError(f"文章 {article_id} 不存在")
+        translated = translate(art["content_md"], target_lang=target_lang)
+        return {"id": article_id, "target_lang": target_lang,
+                "chars": len(translated), "translated_md": translated[:2000]}
+
+    def ai_image_prompts(self, article_id, n=3):
+        """根据文章内容生成文生图 prompt（前端展示/复制给用户）。"""
+        from service.publishing.ai_enhancements import image_prompts
+        art = self.get(article_id)
+        if not art:
+            raise ValueError(f"文章 {article_id} 不存在")
+        prompts = image_prompts(art.get("title", ""), art.get("content_md", ""), n=n)
+        return {"id": article_id, "prompts": prompts}
+
+    def ai_outline(self, article_id):
+        """从已有文章提炼大纲。适合重组超长篇、确认某章节上下文。"""
+        from service.publishing.ai_enhancements import extract_outline
+        art = self.get(article_id)
+        if not art:
+            raise ValueError(f"文章 {article_id} 不存在")
+        outline = extract_outline(art.get("content_md", ""))
+        return {"id": article_id, "outline": outline}
+
+    def ai_seo(self, article_id):
+        """生成 SEO 元数据。"""
+        from service.publishing.ai_enhancements import seo_fields
+        art = self.get(article_id)
+        if not art:
+            raise ValueError(f"文章 {article_id} 不存在")
+        seo = seo_fields(art.get("title", ""), art.get("content_md", ""),
+                        art.get("tags", ""))
+        return {"id": article_id, **seo}
+
+    def clone(self, article_id):
+        """克隆文章：「标题（副本）」+克隆内容。返回新文章 ID。"""
+        from service.publishing.ai_enhancements import clone_article
+        art = self.get(article_id)
+        if not art:
+            raise ValueError(f"文章 {article_id} 不存在")
+        cloned = clone_article(art)
+        new_id = db.create_article(self.conn, **cloned)
+        return {"new_id": new_id, "title": cloned["title"]}
+
+    def ai_write_with_template(self, topic, template_key="", **kw):
+        """用预置模板 AI 写文章。template_key: tutorial/opinion/deep_dive/news_brief。"""
+        from service.publishing.ai_enhancements import ai_write_with_template
+        return ai_write_with_template(topic, template_key, **kw)
+
+    def list_ai_templates(self):
+        """列出所有可用的 AI 写作模板。"""
+        from service.publishing.ai_enhancements import list_templates
+        return list_templates()
 
     def ai_ready(self):
         if self.demo:

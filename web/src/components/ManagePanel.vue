@@ -147,6 +147,58 @@
             </div>
           </div>
         </el-tab-pane>
+
+        <!-- 定时任务 -->
+        <el-tab-pane name="schedules">
+          <template #label>
+            定时任务
+            <el-badge v-if="hub.schedules.length" :value="hub.schedules.length" type="primary" class="tab-badge" />
+          </template>
+          <div v-if="hub.schedules.length" class="sched-list">
+            <div v-for="s in hub.schedules" :key="s.id" class="sched-card" :class="{disabled: !s.enabled}">
+              <div class="sc-head">
+                <el-tag size="small" :type="s.enabled ? 'success' : 'info'" effect="plain">
+                  {{ scheduleLabel(s.schedule_type, s.schedule_expr) }}
+                </el-tag>
+                <span class="sc-title">{{ s.title }}</span>
+                <span class="dim small">#{{ s.id }}</span>
+              </div>
+              <div class="sc-meta dim small">
+                文章 #{{ s.article_id }} · 平台 {{ parsePlats(s.platforms).join('、') }}
+              </div>
+              <div class="sc-meta dim small">
+                下次执行：{{ s.next_run ? fmtTime(s.next_run) : '—' }} · 已跑 {{ s.run_count || 0 }} 次
+              </div>
+              <div class="sc-ops">
+                <el-button size="small" text :type="s.enabled ? 'warning' : 'success'"
+                           @click="s.enabled ? hub.pauseSchedule(s.id) : hub.resumeSchedule(s.id)">
+                  {{ s.enabled ? '暂停' : '启用' }}
+                </el-button>
+                <el-button size="small" text @click="hub.triggerSchedule(s.id)">立即执行</el-button>
+                <el-button size="small" text type="danger" @click="confirmDelete(s)">删除</el-button>
+              </div>
+            </div>
+          </div>
+          <EmptyState v-else title="还没有定时任务"
+                      desc="在编辑器里点「定时发布」创建一个"
+                      :px="72" />
+        </el-tab-pane>
+
+        <!-- 标签治理 -->
+        <el-tab-pane name="tags">
+          <template #label>标签治理</template>
+          <div class="tag-toolbar">
+            <el-button size="small" text @click="hub.syncTags()">重新统计标签</el-button>
+            <span class="dim small">共 {{ hub.tags.length }} 个标签</span>
+          </div>
+          <div v-if="hub.tags.length" class="tag-cloud">
+            <span v-for="t in hub.tags" :key="t.tag" class="tag-chip"
+                  :style="{ fontSize: Math.max(11, Math.min(16, 10 + (t.count || 1) * 0.5)) + 'px' }">
+              {{ t.tag }} <em class="tag-cnt">{{ t.count }}</em>
+            </span>
+          </div>
+          <EmptyState v-else title="还没有标签数据" desc="先保存几篇文章，再点「重新统计标签」" :px="72" />
+        </el-tab-pane>
       </el-tabs>
     </div>
 
@@ -210,7 +262,11 @@ const refreshingId = ref('')      // 正在抓取入库的平台
 const taskDialog = ref(false)
 const taskDetail = ref(null)      // 当前详情任务
 
-onMounted(reloadAll)
+onMounted(() => {
+  reloadAll()
+  hub.loadSchedules()
+  hub.loadTags()
+})
 
 async function reloadAll() {
   reloading.value = true
@@ -218,6 +274,25 @@ async function reloadAll() {
     await Promise.all([hub.loadPendingHuman(), hub.loadTasks(), hub.loadAllPubs(),
                        hub.loadStatus(), hub.loadPlatforms()])
   } finally { reloading.value = false }
+}
+
+// 定时任务辅助
+const scheduleLabel = (type, expr) => {
+  const map = { once: '一次性', daily: '每天', weekly: '每周', cron: 'Cron' }
+  return (map[type] || type) + (expr ? ' · ' + expr : '')
+}
+
+const parsePlats = (p) => {
+  try { return JSON.parse(p || '[]') } catch { return [] }
+}
+
+async function confirmDelete(s) {
+  try {
+    await ElMessageBox.confirm(
+      `删除定时任务「${s.title || '未命名'}」#${s.id}？`, '确认删除',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await hub.deleteSchedule(s.id)
+  } catch { /* 用户取消 */ }
 }
 
 async function doRefresh(p) {
@@ -312,5 +387,30 @@ const fmtTime = (ts) => {
   .ac-top { display: flex; align-items: center; justify-content: space-between; }
   .ac-name { color: var(--tx-1); font-size: var(--fs-md, 14px); }
   .ac-sub { font-size: var(--fs-xs); color: var(--tx-3); margin: 8px 0; }
+}
+
+// 定时任务
+.sched-list { display: flex; flex-direction: column; gap: 10px; }
+.sched-card {
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+  &.disabled { opacity: 0.55; }
+  .sc-head { display: flex; align-items: center; gap: 10px; }
+  .sc-title { color: var(--tx-1); font-size: var(--fs-sm); flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sc-meta { margin-top: 4px; }
+  .sc-ops { display: flex; gap: 6px; margin-top: 8px; }
+}
+
+// 标签治理
+.tag-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px; background: var(--line-soft);
+  color: var(--tx-2); border: 1px solid var(--line);
+  .tag-cnt { font-style: normal; color: var(--tx-4); font-size: 11px; }
+  &.cat-语言 { background: rgba(99,102,241,.08); border-color: rgba(99,102,241,.18); }
+  &.cat-框架 { background: rgba(16,185,129,.08); border-color: rgba(16,185,129,.18); }
+  &.cat-领域 { background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.18); }
 }
 </style>

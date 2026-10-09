@@ -170,6 +170,132 @@ def ai_polish(ctx, id):
     _echo_json(_hub(ctx.obj["headed"]).ai_polish(id))
 
 
+# ==================== CLI: 定时发布 ====================
+
+@cli.command("schedule-add", help="添加定时发布任务")
+@click.option("--article-id", type=int, required=True, help="文章 ID")
+@click.option("--platforms", required=True, help="逗号分隔的目标平台")
+@click.option("--type", "sched_type", type=click.Choice(["once", "daily", "weekly", "cron"]),
+              default="once", help="调度类型")
+@click.option("--expr", "sched_expr", default="", help="调度表达式：once=YYYY-MM-DD HH:MI / daily=HH:MI / weekly=周几-HH:MI / cron=标准5段cron")
+@click.option("--title", default="", help="任务标题")
+@click.option("--draft", is_flag=True, help="只发草稿")
+@click.pass_context
+def schedule_add(ctx, article_id, platforms, sched_type, sched_expr, title, draft):
+    sid = _hub(ctx.obj["headed"]).scheduler.create(
+        article_id, platforms.split(","), draft_only=draft,
+        schedule_type=sched_type, schedule_expr=sched_expr, title=title)
+    click.echo(f"定时任务 ID = {sid}")
+
+
+@cli.command("schedule-list", help="列出全部定时任务")
+@click.option("--all", "show_all", is_flag=True, help="包含已禁用的")
+@click.pass_context
+def schedule_list(ctx, show_all):
+    _echo_json(_hub(ctx.obj["headed"]).scheduler.list_all(include_disabled=show_all))
+
+
+@cli.command("schedule-del", help="删除定时任务")
+@click.option("--id", type=int, required=True)
+@click.pass_context
+def schedule_del(ctx, id):
+    _hub(ctx.obj["headed"]).scheduler.delete(id)
+    click.echo(f"已删除定时任务 {id}")
+
+
+@cli.command("schedule-trigger", help="手动立即执行一次定时任务")
+@click.option("--id", type=int, required=True)
+@click.pass_context
+def schedule_trigger(ctx, id):
+    _hub(ctx.obj["headed"]).scheduler.trigger_now(id)
+    click.echo(f"已触发定时任务 {id}")
+
+
+# ==================== CLI: 文章版本 ====================
+
+@cli.command("versions", help="列出文章的版本历史")
+@click.option("--id", "aid", type=int, required=True)
+@click.pass_context
+def versions_cmd(ctx, aid):
+    from service.publishing.versions import list_versions
+    _echo_json(list_versions(_hub(ctx.obj["headed"]).conn, aid))
+
+
+@cli.command("rollback", help="回滚文章到指定版本")
+@click.option("--article-id", type=int, required=True)
+@click.option("--version-id", type=int, required=True)
+@click.pass_context
+def rollback_cmd(ctx, article_id, version_id):
+    from service.publishing.versions import rollback
+    ok, msg = rollback(_hub(ctx.obj["headed"]).conn, version_id)
+    click.echo(("✓ " if ok else "✗ ") + msg)
+
+
+# ==================== CLI: AI 增强 ====================
+
+@cli.command("ai-translate", help="AI 翻译文章")
+@click.option("--id", "aid", type=int, required=True)
+@click.option("--lang", default="en", help="目标语言：en/ja/ko/fr/de")
+@click.pass_context
+def ai_translate_cmd(ctx, aid, lang):
+    _echo_json(_hub(ctx.obj["headed"]).ai_translate(aid, lang))
+
+
+@cli.command("ai-prompts", help="AI 生成文章配图 prompt")
+@click.option("--id", "aid", type=int, required=True)
+@click.option("--n", type=int, default=3)
+@click.pass_context
+def ai_prompts_cmd(ctx, aid, n):
+    _echo_json(_hub(ctx.obj["headed"]).ai_image_prompts(aid, n))
+
+
+@cli.command("ai-outline", help="AI 提炼文章大纲")
+@click.option("--id", "aid", type=int, required=True)
+@click.pass_context
+def ai_outline_cmd(ctx, aid):
+    _echo_json(_hub(ctx.obj["headed"]).ai_outline(aid))
+
+
+@cli.command("ai-seo", help="AI 生成 SEO 元数据")
+@click.option("--id", "aid", type=int, required=True)
+@click.pass_context
+def ai_seo_cmd(ctx, aid):
+    _echo_json(_hub(ctx.obj["headed"]).ai_seo(aid))
+
+
+@cli.command("clone", help="克隆文章（标题自动加「副本）」）")
+@click.option("--id", "aid", type=int, required=True)
+@click.pass_context
+def clone_cmd(ctx, aid):
+    _echo_json(_hub(ctx.obj["headed"]).clone(aid))
+
+
+# ==================== CLI: 标签治理 ====================
+
+@cli.command("tags", help="列出热门标签")
+@click.option("--limit", type=int, default=30)
+@click.pass_context
+def tags_cmd(ctx, limit):
+    from service.publishing.tags import list_tags
+    _echo_json(list_tags(_hub(ctx.obj["headed"]).conn, limit=limit))
+
+
+@cli.command("tag-sync", help="从文章重建标签统计")
+@click.pass_context
+def tag_sync_cmd(ctx):
+    from service.publishing.tags import sync_from_articles
+    _echo_json(sync_from_articles(_hub(ctx.obj["headed"]).conn))
+
+
+@cli.command("tag-rename", help="重命名标签")
+@click.option("--old", required=True)
+@click.option("--new", required=True)
+@click.pass_context
+def tag_rename_cmd(ctx, old, new):
+    from service.publishing.tags import rename_tag
+    _echo_json(rename_tag(_hub(ctx.obj["headed"]).conn, old, new))
+
+
 @cli.command(help="中台总览：文章数、发布数、待同步数、账号状态")
 @click.pass_context
 def status(ctx):

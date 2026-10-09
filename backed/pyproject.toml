@@ -3,7 +3,7 @@
 
 [project]
 name = "ai-content-hub-backend"
-version = "0.4.1"
+version = "0.5.0"
 description = "AI 内容中台后端：基于 FastAPI 的文章库 / 多平台发布 / AIGC 合规门禁"
 readme = "README.md"
 requires-python = ">=3.10"
