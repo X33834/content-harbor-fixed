@@ -267,8 +267,12 @@ def _find_chrome():
     """
     import glob
     home = Path.home() / ".cache" / "ms-playwright"
-    for root in (Path("/opt/vm/preinstall/ms-playwright"), home):
+    for root in (Path("/opt/vm/preinstall/ms-playwright"),
+                 Path("/opt/playwright"),
+                 home):
         for pat in ("chromium-*/chrome-linux/chrome",
+                    "chromium-*/chrome-linux64/chrome",
+                    "chromium_headless_shell-*/chrome-linux64/chrome-headless-shell",
                     "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"):
             hits = sorted(glob.glob(str(root / pat)))
             if hits:
